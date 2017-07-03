@@ -42,7 +42,7 @@ __global__ void parallelCalculator(float *input, float *output, int num_commands
 {
 	float out;
 	int idx;
-	
+
 	idx = threadIdx.x + blockIdx.x*blockDim.x;
 
 	//get input
@@ -54,22 +54,22 @@ __global__ void parallelCalculator(float *input, float *output, int num_commands
 		float v = d_operands[i];
 
 		switch (cmd){
-			case(CALCULATOR_ADD) : {
-				out += v;
-				break;
-			}
-			case(CALCULATOR_SUB) : {
-				out -= v;
-				break;
-			}
-			case(CALCULATOR_DIV) : {
-				out /= v;
-				break;
-			}
-			case(CALCULATOR_MUL) : {
-				out *= v;
-				break;
-			}
+		case(CALCULATOR_ADD) : {
+								   out += v;
+								   break;
+		}
+		case(CALCULATOR_SUB) : {
+								   out -= v;
+								   break;
+		}
+		case(CALCULATOR_DIV) : {
+								   out /= v;
+								   break;
+		}
+		case(CALCULATOR_MUL) : {
+								   out *= v;
+								   break;
+		}
 		}
 	}
 
@@ -132,15 +132,16 @@ void cudaCalculatorDefaultStream(CALCULATOR_COMMANDS *commands, float *operands,
 	//begin timing
 	cudaEventRecord(start);
 
-	//Stage 1) Synchronous host to device memory copy
+	//1) Asynchronous host to device memory copy
 	cudaMemcpy(d_input, h_input, sizeof(float)*SAMPLES, cudaMemcpyHostToDevice);
 	checkCUDAError("CUDA Memory copy H2D: default stream");
 
-	//Stage 2) Execute kernel
+
+	//2) Execute kernel
 	parallelCalculator << <SAMPLES / TPB, TPB >> >(d_input, d_output, num_commands);
 	checkCUDAError("CUDA Kernel: default stream");
 
-	//Stage 3) Synchronous device to host memory copy
+	//3) Asynchronousdevice to host memory copy
 	cudaMemcpy(h_output, d_output, sizeof(float)*SAMPLES, cudaMemcpyDeviceToHost);
 	checkCUDAError("CUDA Memory copy D2H: default stream");
 
@@ -174,9 +175,20 @@ void cudaCalculatorNStream1(CALCULATOR_COMMANDS *commands, float *operands, int 
 	cudaEventCreate(&start);
 	cudaEventCreate(&stop);
 
-	//Exercise 2.1) Allocate GPU and CPU memory
+	//allocate memory
+	cudaMallocHost((void**)&h_input, sizeof(float)*SAMPLES);
+	cudaMallocHost((void**)&h_output, sizeof(float)*SAMPLES);
 
-	//Exercise 2.2) Initialise the streams
+	//allocate device memory
+	cudaMalloc((void**)&d_input, sizeof(float)*SAMPLES);
+	cudaMalloc((void**)&d_output, sizeof(float)*SAMPLES);
+	checkCUDAError("CUDA Memory allocate: default stream");
+
+	//init streams
+	for (i = 0; i < NUM_STREAMS; i++){
+		//create the stream
+		cudaStreamCreate(&streams[i]);
+	}
 
 	//init the host input
 	initInput(h_input);
@@ -184,14 +196,21 @@ void cudaCalculatorNStream1(CALCULATOR_COMMANDS *commands, float *operands, int 
 	//begin timing
 	cudaEventRecord(start);
 
-	//Exercise 2.3) Loop through the streams and schedule a H2D copy, kernel execution and D2H copy
+	int batch_samples = SAMPLES / NUM_STREAMS;
 	for (i = 0; i < NUM_STREAMS; i++){
+		int offset = i*batch_samples;
 
-		//Stage 1) Asynchronous host to device memory copy
+		//1) Asynchronous host to device memory copy
+		cudaMemcpyAsync(d_input + offset, h_input + offset, sizeof(float)*batch_samples, cudaMemcpyHostToDevice, streams[i]);
+		checkCUDAError("CUDA Memory copy H2D: N streams");
 
-		//Stage 2) Execute kernel
+		//2) Execute kernel
+		parallelCalculator << <batch_samples / TPB, TPB, 0, streams[i] >> >(d_input + offset, d_output + offset, num_commands);
+		checkCUDAError("CUDA Kernel: N streams");
 
-		//Stage 3) Asynchronous device to host memory copy
+		//3) Asynchronous device to host memory copy
+		cudaMemcpyAsync(h_output + offset, d_output + offset, sizeof(float)*batch_samples, cudaMemcpyDeviceToHost, streams[i]);
+		checkCUDAError("CUDA Memory copy D2H: N streams");
 	}
 
 	//end timing
@@ -205,9 +224,12 @@ void cudaCalculatorNStream1(CALCULATOR_COMMANDS *commands, float *operands, int 
 	errors = checkResults(h_input, h_output, commands, operands, num_commands);
 	printf("Async V1 (%d streams) Completed in %f seconds with %d errors\n", NUM_STREAMS, time, errors);
 
-	//Exercise 2.4)
-	//Cleanup by destroying each stream
-
+	//cleanup
+	//init streams
+	for (i = 0; i < NUM_STREAMS; i++){
+		//create the stream
+		cudaStreamDestroy(streams[i]);
+	}
 	cudaFree(d_input);
 	cudaFree(d_output);
 	cudaFreeHost(h_input);
@@ -227,10 +249,20 @@ void cudaCalculatorNStream2(CALCULATOR_COMMANDS *commands, float *operands, int 
 	cudaEventCreate(&start);
 	cudaEventCreate(&stop);
 
-	//TODO: Allocate GPU and CPU memory
+	//allocate memory
+	cudaMallocHost((void**)&h_input, sizeof(float)*SAMPLES);
+	cudaMallocHost((void**)&h_output, sizeof(float)*SAMPLES);
 
-	//TODO: Initialise the streams
+	//allocate device memory
+	cudaMalloc((void**)&d_input, sizeof(float)*SAMPLES);
+	cudaMalloc((void**)&d_output, sizeof(float)*SAMPLES);
+	checkCUDAError("CUDA Memory allocate: default stream");
 
+	//init streams
+	for (i = 0; i < NUM_STREAMS; i++){
+		//create the stream
+		cudaStreamCreate(&streams[i]);
+	}
 
 	//init the host input
 	initInput(h_input);
@@ -239,19 +271,29 @@ void cudaCalculatorNStream2(CALCULATOR_COMMANDS *commands, float *operands, int 
 	cudaEventRecord(start);
 
 	int batch_samples = SAMPLES / NUM_STREAMS;
-	
+
 	for (i = 0; i < NUM_STREAMS; i++){
-		//Exercise 2.5) Asynchronous host to device memory copy
+		int offset = i*batch_samples;
+		//1) Asynchronous host to device memory copy
+		cudaMemcpyAsync(d_input + offset, h_input + offset, sizeof(float)*batch_samples, cudaMemcpyHostToDevice, streams[i]);
+		checkCUDAError("CUDA Memory copy H2D: N streams");
 	}
 
 	for (i = 0; i < NUM_STREAMS; i++){
-		//Stage 2) Execute kernel
+		int offset = i*batch_samples;
+		//2) Execute kernel
+		parallelCalculator << <batch_samples / TPB, TPB, 0, streams[i] >> >(d_input + offset, d_output + offset, num_commands);
+		checkCUDAError("CUDA Kernel: N streams");
+
 	}
 
 	for (i = 0; i < NUM_STREAMS; i++){
-		//Stage 3) Asynchronous device to host memory copy
+		int offset = i*batch_samples;
+		//3) Asynchronous device to host memory copy
+		cudaMemcpyAsync(h_output + offset, d_output + offset, sizeof(float)*batch_samples, cudaMemcpyDeviceToHost, streams[i]);
+		checkCUDAError("CUDA Memory copy D2H: N streams");
 	}
-	
+
 
 	//end timing
 	cudaEventRecord(stop);
@@ -264,8 +306,12 @@ void cudaCalculatorNStream2(CALCULATOR_COMMANDS *commands, float *operands, int 
 	errors = checkResults(h_input, h_output, commands, operands, num_commands);
 	printf("Async V2 (%d streams) Completed in %f seconds with %d errors\n", NUM_STREAMS, time, errors);
 
-	//TODO: Cleanup by destroying each stream
-
+	//cleanup
+	//init streams
+	for (i = 0; i < NUM_STREAMS; i++){
+		//create the stream
+		cudaStreamDestroy(streams[i]);
+	}
 	cudaFree(d_input);
 	cudaFree(d_output);
 	cudaFreeHost(h_input);
