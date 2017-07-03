@@ -34,8 +34,7 @@ void initInput(float *input);
 void checkCUDAError(const char *msg);
 int readLine(FILE *f, char buffer[]);
 void cudaCalculatorDefaultStream(CALCULATOR_COMMANDS *commands, float *operands, int num_commands);
-void cudaCalculatorNStream1(CALCULATOR_COMMANDS *commands, float *operands, int num_commands);
-void cudaCalculatorNStream2(CALCULATOR_COMMANDS *commands, float *operands, int num_commands);
+void cudaCalculatorNStream(CALCULATOR_COMMANDS *commands, float *operands, int num_commands);
 int checkResults(float* h_input, float* h_output, CALCULATOR_COMMANDS *commands, float *operands, int num_commands);
 
 __global__ void parallelCalculator(float *input, float *output, int num_commands)
@@ -98,10 +97,7 @@ int main(int argc, char**argv){
 	cudaCalculatorDefaultStream(h_commands, h_operands, num_commands);
 
 	//perform asynchronous version
-	cudaCalculatorNStream1(h_commands, h_operands, num_commands);
-
-	//perform asynchronous version
-	cudaCalculatorNStream2(h_commands, h_operands, num_commands);
+	cudaCalculatorNStream(h_commands, h_operands, num_commands);
 
 
 }
@@ -162,60 +158,8 @@ void cudaCalculatorDefaultStream(CALCULATOR_COMMANDS *commands, float *operands,
 	free(h_output);
 }
 
-void cudaCalculatorNStream1(CALCULATOR_COMMANDS *commands, float *operands, int num_commands){
-	float *h_input, *h_output;
-	float *d_input, *d_output;
-	float time;
-	cudaEvent_t start, stop;
-	int i, errors;
-	cudaStream_t streams[NUM_STREAMS];
 
-	//init cuda events
-	cudaEventCreate(&start);
-	cudaEventCreate(&stop);
-
-	//Exercise 2.1) Allocate GPU and CPU memory
-
-	//Exercise 2.2) Initialise the streams
-
-	//init the host input
-	initInput(h_input);
-
-	//begin timing
-	cudaEventRecord(start);
-
-	//Exercise 2.3) Loop through the streams and schedule a H2D copy, kernel execution and D2H copy
-	for (i = 0; i < NUM_STREAMS; i++){
-
-		//Stage 1) Asynchronous host to device memory copy
-
-		//Stage 2) Execute kernel
-
-		//Stage 3) Asynchronous device to host memory copy
-	}
-
-	//end timing
-	cudaEventRecord(stop);
-	cudaEventSynchronize(stop);
-	cudaEventElapsedTime(&time, start, stop);
-	cudaEventDestroy(start);
-	cudaEventDestroy(stop);
-
-	//check for errors and print timing
-	errors = checkResults(h_input, h_output, commands, operands, num_commands);
-	printf("Async V1 (%d streams) Completed in %f seconds with %d errors\n", NUM_STREAMS, time, errors);
-
-	//Exercise 2.4)
-	//Cleanup by destroying each stream
-
-	cudaFree(d_input);
-	cudaFree(d_output);
-	cudaFreeHost(h_input);
-	cudaFreeHost(h_output);
-}
-
-
-void cudaCalculatorNStream2(CALCULATOR_COMMANDS *commands, float *operands, int num_commands){
+void cudaCalculatorNStream(CALCULATOR_COMMANDS *commands, float *operands, int num_commands){
 	float *h_input, *h_output;
 	float *d_input, *d_output;
 	float time;
@@ -262,7 +206,7 @@ void cudaCalculatorNStream2(CALCULATOR_COMMANDS *commands, float *operands, int 
 
 	//check for errors and print timing
 	errors = checkResults(h_input, h_output, commands, operands, num_commands);
-	printf("Async V2 (%d streams) Completed in %f seconds with %d errors\n", NUM_STREAMS, time, errors);
+	printf("Async (%d streams) Completed in %f seconds with %d errors\n", NUM_STREAMS, time, errors);
 
 	//TODO: Cleanup by destroying each stream
 
