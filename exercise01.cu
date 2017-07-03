@@ -34,8 +34,7 @@ void initInput(float *input);
 void checkCUDAError(const char *msg);
 int readLine(FILE *f, char buffer[]);
 void cudaCalculatorDefaultStream(CALCULATOR_COMMANDS *commands, float *operands, int num_commands);
-void cudaCalculatorNStream1(CALCULATOR_COMMANDS *commands, float *operands, int num_commands);
-void cudaCalculatorNStream2(CALCULATOR_COMMANDS *commands, float *operands, int num_commands);
+void cudaCalculatorNStream(CALCULATOR_COMMANDS *commands, float *operands, int num_commands);
 int checkResults(float* h_input, float* h_output, CALCULATOR_COMMANDS *commands, float *operands, int num_commands);
 
 __global__ void parallelCalculator(float *input, float *output, int num_commands)
@@ -98,10 +97,7 @@ int main(int argc, char**argv){
 	cudaCalculatorDefaultStream(h_commands, h_operands, num_commands);
 
 	//perform asynchronous version
-	cudaCalculatorNStream1(h_commands, h_operands, num_commands);
-
-	//perform asynchronous version
-	cudaCalculatorNStream2(h_commands, h_operands, num_commands);
+	cudaCalculatorNStream(h_commands, h_operands, num_commands);
 
 
 }
@@ -163,81 +159,8 @@ void cudaCalculatorDefaultStream(CALCULATOR_COMMANDS *commands, float *operands,
 	free(h_output);
 }
 
-void cudaCalculatorNStream1(CALCULATOR_COMMANDS *commands, float *operands, int num_commands){
-	float *h_input, *h_output;
-	float *d_input, *d_output;
-	float time;
-	cudaEvent_t start, stop;
-	int i, errors;
-	cudaStream_t streams[NUM_STREAMS];
 
-	//init cuda events
-	cudaEventCreate(&start);
-	cudaEventCreate(&stop);
-
-	//allocate memory
-	cudaMallocHost((void**)&h_input, sizeof(float)*SAMPLES);
-	cudaMallocHost((void**)&h_output, sizeof(float)*SAMPLES);
-
-	//allocate device memory
-	cudaMalloc((void**)&d_input, sizeof(float)*SAMPLES);
-	cudaMalloc((void**)&d_output, sizeof(float)*SAMPLES);
-	checkCUDAError("CUDA Memory allocate: default stream");
-
-	//init streams
-	for (i = 0; i < NUM_STREAMS; i++){
-		//create the stream
-		cudaStreamCreate(&streams[i]);
-	}
-
-	//init the host input
-	initInput(h_input);
-
-	//begin timing
-	cudaEventRecord(start);
-
-	int batch_samples = SAMPLES / NUM_STREAMS;
-	for (i = 0; i < NUM_STREAMS; i++){
-		int offset = i*batch_samples;
-
-		//1) Asynchronous host to device memory copy
-		cudaMemcpyAsync(d_input + offset, h_input + offset, sizeof(float)*batch_samples, cudaMemcpyHostToDevice, streams[i]);
-		checkCUDAError("CUDA Memory copy H2D: N streams");
-
-		//2) Execute kernel
-		parallelCalculator << <batch_samples / TPB, TPB, 0, streams[i] >> >(d_input + offset, d_output + offset, num_commands);
-		checkCUDAError("CUDA Kernel: N streams");
-
-		//3) Asynchronous device to host memory copy
-		cudaMemcpyAsync(h_output + offset, d_output + offset, sizeof(float)*batch_samples, cudaMemcpyDeviceToHost, streams[i]);
-		checkCUDAError("CUDA Memory copy D2H: N streams");
-	}
-
-	//end timing
-	cudaEventRecord(stop);
-	cudaEventSynchronize(stop);
-	cudaEventElapsedTime(&time, start, stop);
-	cudaEventDestroy(start);
-	cudaEventDestroy(stop);
-
-	//check for errors and print timing
-	errors = checkResults(h_input, h_output, commands, operands, num_commands);
-	printf("Async V1 (%d streams) Completed in %f seconds with %d errors\n", NUM_STREAMS, time, errors);
-
-	//cleanup
-	//init streams
-	for (i = 0; i < NUM_STREAMS; i++){
-		//create the stream
-		cudaStreamDestroy(streams[i]);
-	}
-	cudaFree(d_input);
-	cudaFree(d_output);
-	cudaFreeHost(h_input);
-	cudaFreeHost(h_output);
-}
-
-
-void cudaCalculatorNStream2(CALCULATOR_COMMANDS *commands, float *operands, int num_commands){
+void cudaCalculatorNStream(CALCULATOR_COMMANDS *commands, float *operands, int num_commands){
 	float *h_input, *h_output;
 	float *d_input, *d_output;
 	float time;
@@ -304,7 +227,7 @@ void cudaCalculatorNStream2(CALCULATOR_COMMANDS *commands, float *operands, int 
 
 	//check for errors and print timing
 	errors = checkResults(h_input, h_output, commands, operands, num_commands);
-	printf("Async V2 (%d streams) Completed in %f seconds with %d errors\n", NUM_STREAMS, time, errors);
+	printf("Async (%d streams) Completed in %f seconds with %d errors\n", NUM_STREAMS, time, errors);
 
 	//cleanup
 	//init streams
